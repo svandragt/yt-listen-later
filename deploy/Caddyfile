@@ -1,0 +1,30 @@
+# Automatic HTTPS in front of the container, which Overcast needs.
+# Started by: docker compose --profile tls up -d
+#
+# BASE_URL in .env must match this hostname exactly, e.g.
+#   BASE_URL=https://listen.example.com
+
+listen.example.com {
+	# "yt-listen-later" is the compose service name, resolved on the internal
+	# network. Caddy passes Range requests through, which podcast apps use
+	# to seek, and the app answers them with 206s.
+	reverse_proxy yt-listen-later:8000
+
+	@feed path /feed.xml
+	header @feed Cache-Control "public, max-age=300"
+	# Media filenames contain the video id and never change contents.
+	header /media/* Cache-Control "public, max-age=31536000, immutable"
+
+	# Worth it for the feed XML; Caddy skips already-compressed audio types.
+	encode gzip
+
+	# Anyone with the URL can fetch your audio. Uncomment to require a
+	# password — Overcast accepts basic auth credentials in the subscribe URL.
+	# basic_auth {
+	#     listener <hash from: docker run caddy:2-alpine caddy hash-password>
+	# }
+
+	log {
+		output stdout
+	}
+}

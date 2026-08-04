@@ -1,0 +1,19 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.13.7/.schema/devbox.schema.json",
+  "packages": [
+    "uv@latest",
+    "ffmpeg@latest"
+  ],
+  "shell": {
+    "init_hook": [
+      "test -f .env || echo 'no .env yet — cp .env.example .env and set YOUTUBE_PLAYLIST_URL + BASE_URL'"
+    ],
+    "scripts": {
+      "sync": "uv run ./yt_listen_later.py sync",
+      "feed": "uv run ./yt_listen_later.py feed",
+      "serve": "uv run ./yt_listen_later.py serve",
+      "run": "uv run ./yt_listen_later.py run",
+      "test": "uv run ./test_yt_listen_later.py"
+    }
+  }
+}
