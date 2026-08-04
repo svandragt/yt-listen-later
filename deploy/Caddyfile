@@ -1,23 +1,14 @@
-# Caddy gets you automatic HTTPS, which Overcast needs, in a few lines.
-# Put this in /etc/caddy/Caddyfile and `systemctl reload caddy`.
+# Automatic HTTPS in front of the container, which Overcast needs.
+# Started by: docker compose --profile tls up -d
 #
 # BASE_URL in .env must match this hostname exactly, e.g.
 #   BASE_URL=https://listen.example.com
 
 listen.example.com {
-	# Option A (recommended on a small VPS): Caddy serves the files directly,
-	# so there is no long-running Python process at all — just the sync timer.
-	# Caddy handles the Range requests podcast apps use to seek.
-	root * /srv/yt-listen-later/public
-	file_server
-
-	# Option B: proxy to the built-in server instead (yt-listen-later.service).
-	# Comment out the two lines above and uncomment this one.
-	# reverse_proxy 127.0.0.1:8000
-
-	# Don't expose the state file, which sits in the same directory.
-	@state path /.state.json
-	respond @state 404
+	# "yt-listen-later" is the compose service name, resolved on the internal
+	# network. Caddy passes Range requests through, which podcast apps use
+	# to seek, and the app answers them with 206s.
+	reverse_proxy yt-listen-later:8000
 
 	@feed path /feed.xml
 	header @feed Cache-Control "public, max-age=300"
@@ -30,10 +21,10 @@ listen.example.com {
 	# Anyone with the URL can fetch your audio. Uncomment to require a
 	# password — Overcast accepts basic auth credentials in the subscribe URL.
 	# basic_auth {
-	#     listener <hash from: caddy hash-password>
+	#     listener <hash from: docker run caddy:2-alpine caddy hash-password>
 	# }
 
 	log {
-		output file /var/log/caddy/yt-listen-later.log
+		output stdout
 	}
 }

@@ -1,0 +1,57 @@
+services:
+  yt-listen-later:
+    build: .
+    image: yt-listen-later
+    container_name: yt-listen-later
+    restart: unless-stopped
+
+    # Playlist, BASE_URL, MAX_TOTAL_MB and friends all come from .env.
+    env_file: .env
+    environment:
+      # These override .env: inside the container the paths and bind address are
+      # fixed, whatever the host config says.
+      PUBLIC_DIR: /data/public
+      HOST: 0.0.0.0
+      PORT: 8000
+
+    volumes:
+      # Audio, feed.xml and the state file. chown it to uid 1000 first:
+      #   mkdir -p data && sudo chown -R 1000:1000 data
+      - ./data:/data
+
+    # Loopback only — the reverse proxy below terminates TLS. Drop the
+    # 127.0.0.1: prefix only if you are proxying from another host.
+    ports:
+      - "127.0.0.1:8000:8000"
+
+    # Transcoding will happily eat a small VPS; keep it in its lane.
+    cpus: 1.0
+    mem_limit: 768m
+    security_opt:
+      - no-new-privileges:true
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Automatic HTTPS, which Overcast needs. Start it with:
+  #   docker compose --profile tls up -d
+  caddy:
+    image: caddy:2-alpine
+    container_name: yt-listen-later-caddy
+    profiles: [tls]
+    restart: unless-stopped
+    depends_on: [yt-listen-later]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  caddy-data:
+  caddy-config:

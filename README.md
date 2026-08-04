@@ -8,22 +8,21 @@ A single [uv](https://docs.astral.sh/uv/) script does the whole job: it reads th
 playlist with `yt-dlp`, extracts audio with `ffmpeg`, writes an iTunes-flavoured
 `feed.xml`, and serves both over HTTP with byte-range support so seeking works.
 
-## Requirements
+To run it on a server, go straight to [Deploying with Docker](#deploying-with-docker)
+— that needs nothing on the host but Docker itself.
 
-- `uv` (fetches Python and the script's dependencies itself)
-- `ffmpeg` on `PATH`
+## Running it locally
 
-## Setup
+Needs `uv` (which fetches Python and the script's dependencies itself) and
+`ffmpeg` on `PATH`.
 
 ```sh
 cp .env.example .env
 $EDITOR .env          # set YOUTUBE_PLAYLIST_URL and BASE_URL
 ```
 
-### With devbox
-
-[devbox](https://www.jetify.com/devbox) provides both dependencies, so nothing
-lands on your system:
+Or let [devbox](https://www.jetify.com/devbox) provide both dependencies, so
+neither lands on your system:
 
 ```sh
 devbox shell           # uv + ffmpeg on PATH
@@ -49,10 +48,11 @@ Overcast fetches the feed from its own servers, so `localhost` won't do —
 `BASE_URL` has to be publicly reachable and must match how the feed is served.
 Any of these work:
 
+- the bundled Caddy container (see below) — the simplest option on a server
 - `tailscale funnel 8000`
 - `cloudflared tunnel --url http://localhost:8000`
 - `ngrok http 8000`
-- nginx/Caddy in front of `serve`, or just rsync `public/` to any static host
+- nginx in front of `serve`, or just rsync `public/` to any static host
 
 Set `BASE_URL` to the resulting HTTPS URL and re-run `sync` (or `feed`) so the
 enclosure URLs are regenerated.
@@ -60,50 +60,78 @@ enclosure URLs are regenerated.
 Anyone with the URL can read the feed and the audio — there's no auth. Keep the
 URL private, or put basic auth on the reverse proxy.
 
-## Hosting on a VPS
+## Deploying with Docker
 
-`deploy/install.sh` sets the whole thing up on a Debian/Ubuntu box — installs
-ffmpeg and uv, creates a system user, copies the script to `/srv/yt-listen-later`,
-and enables a systemd timer that syncs every 30 minutes:
+This is the supported way to run it on a server. The image carries ffmpeg and the
+Python dependencies, so the VPS needs nothing but Docker.
 
 ```sh
-sudo ./deploy/install.sh
-sudo -e /srv/yt-listen-later/.env       # playlist + BASE_URL
-sudo systemctl start yt-listen-later-sync.service
-journalctl -fu yt-listen-later-sync.service
+git clone https://github.com/svandragt/yt-listen-later && cd yt-listen-later
+cp .env.example .env
+$EDITOR .env                          # playlist + BASE_URL
+
+mkdir -p data && sudo chown -R 1000:1000 data   # container runs as uid 1000
+
+docker compose up -d --build
+docker compose logs -f
 ```
 
-It's idempotent, so re-run it after pulling new commits.
+That runs `run`: one sync on startup, then serving while re-syncing every
+`REFRESH_MINUTES`. A single foreground process, restarted by Docker if it dies.
 
-Then serve `/srv/yt-listen-later/public` over HTTPS. `deploy/Caddyfile` does that
-with automatic certificates; point it at the directory and **no long-running
-Python process is needed at all** — just the sync timer. If you'd rather proxy to
-the built-in server, uncomment the `reverse_proxy` line and
-`systemctl enable --now yt-listen-later.service` (it binds to loopback only).
+Add HTTPS — which Overcast requires — with the bundled Caddy service:
 
-`deploy/` contains:
+```sh
+$EDITOR deploy/Caddyfile               # replace listen.example.com
+docker compose --profile tls up -d
+```
 
-| File | What |
-|---|---|
-| `install.sh` | one-shot installer, re-runnable |
-| `yt-listen-later-sync.service` + `.timer` | periodic sync, niced so ffmpeg doesn't hog a 1-vCPU box |
-| `yt-listen-later.service` | the optional built-in HTTP server |
-| `Caddyfile` | HTTPS, cache headers, optional basic auth |
+Caddy fetches a certificate on first request and proxies to the app container.
+Set `BASE_URL` to the same hostname, then subscribe in Overcast to
+`$BASE_URL/feed.xml`.
 
-### Small VPS notes
+### Day-to-day
+
+```sh
+docker compose exec yt-listen-later sync    # sync now, don't wait for the timer
+docker compose exec yt-listen-later feed    # rebuild feed.xml after editing .env
+docker compose run --rm yt-listen-later ./test_yt_listen_later.py
+docker compose up -d --build               # upgrade after a git pull
+docker compose logs -f yt-listen-later
+```
+
+Everything mutable lives in `./data` — audio, `feed.xml`, and the state file — so
+that's the only thing to back up, and destroying the container loses nothing.
+
+### Notes for a small VPS
 
 Disk is usually the binding constraint, and audio accumulates quietly:
 
 - **`MAX_TOTAL_MB`** caps the media directory in MiB. Past the cap the oldest
   episodes are deleted and *not* re-downloaded on the next sync — `MAX_EPISODES`
-  bounds the episode count, this bounds the bytes. Set it to something like
-  two thirds of your free space.
+  bounds the episode count, this bounds the bytes. Set it to something like two
+  thirds of the free space on the volume.
 - **`AUDIO_FORMAT=opus`** with `AUDIO_QUALITY=48K` is roughly a third the size of
-  default m4a for talking-head video, and Overcast plays opus fine.
-- The sync unit is `Nice=10` with idle IO so transcoding doesn't make the box
-  unresponsive while you're using it for something else.
+  the default m4a for talking-head video, and Overcast plays opus fine. Pick this
+  before the first sync — changing it later won't re-encode what you already have.
+- Compose caps the container at 1 CPU and 768 MB so ffmpeg can't make the box
+  unresponsive, and caps the JSON log at 30 MB total.
 - Downloads are checkpointed per episode, so a sync killed by an OOM or a reboot
-  resumes rather than starting the backlog again.
+  resumes instead of restarting the backlog.
+- The app binds to `127.0.0.1:8000` on the host, so nothing is exposed until you
+  put the reverse proxy in front of it.
+
+### Without compose
+
+```sh
+docker build -t yt-listen-later .
+docker run -d --name yt-listen-later --restart unless-stopped \
+  --env-file .env -e PUBLIC_DIR=/data/public \
+  -v "$PWD/data:/data" -p 127.0.0.1:8000:8000 \
+  yt-listen-later
+```
+
+Pass a subcommand to override the default: `docker run --rm ... yt-listen-later sync`.
 
 ## Keeping it fresh
 

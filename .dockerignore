@@ -1,0 +1,10 @@
+.env
+data/
+public/
+.git/
+.devbox/
+devbox.lock
+__pycache__/
+*.pyc
+.venv/
+README.md
