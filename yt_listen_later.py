@@ -78,6 +78,7 @@ class Config:
     category: str
     explicit: bool
     max_episodes: int
+    max_total_mb: int
     audio_format: str
     audio_quality: str
     prune: bool
@@ -158,6 +159,7 @@ def load_config(env_file: str | None) -> Config:
         category=os.environ.get("FEED_CATEGORY", "Technology").strip() or "Technology",
         explicit=env_bool("FEED_EXPLICIT", False),
         max_episodes=env_int("MAX_EPISODES", 50),
+        max_total_mb=env_int("MAX_TOTAL_MB", 0),
         audio_format=os.environ.get("AUDIO_FORMAT", "m4a").strip().lower() or "m4a",
         audio_quality=os.environ.get("AUDIO_QUALITY", "0").strip() or "0",
         prune=env_bool("PRUNE_REMOVED", True),
@@ -269,6 +271,9 @@ class State:
     playlist_title: str = ""
     playlist_url: str = ""
     cover: str = ""
+    # Videos dropped by the disk budget. Remembered so the next sync doesn't
+    # re-download what it is only going to evict again.
+    evicted: set[str] = field(default_factory=set)
 
     @classmethod
     def load(cls, path: Path) -> "State":
@@ -287,6 +292,7 @@ class State:
             playlist_title=raw.get("playlist_title", ""),
             playlist_url=raw.get("playlist_url", ""),
             cover=raw.get("cover", ""),
+            evicted=set(raw.get("evicted") or []),
         )
 
     def save(self, path: Path) -> None:
@@ -295,6 +301,7 @@ class State:
             "playlist_title": self.playlist_title,
             "playlist_url": self.playlist_url,
             "cover": self.cover,
+            "evicted": sorted(self.evicted),
             "episodes": {vid: ep.to_dict() for vid, ep in self.episodes.items()},
         }
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -430,6 +437,56 @@ def download_cover(cfg: Config, info: dict, state: State) -> None:
     log(f"saved cover art to {target}")
 
 
+def human_bytes(size: int) -> str:
+    value = float(size)
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if value < 1024 or unit == "GiB":
+            return f"{value:.0f} {unit}" if unit == "B" else f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} GiB"
+
+
+def enforce_disk_budget(cfg: Config, state: State) -> int:
+    """Drop the oldest episodes until the media directory fits MAX_TOTAL_MB.
+
+    A small VPS runs out of disk long before it runs out of episodes, and
+    MAX_EPISODES bounds the count rather than the bytes.
+    """
+    if cfg.max_total_mb <= 0:
+        return 0
+
+    budget = cfg.max_total_mb * 1024 * 1024
+    newest_first = sorted(
+        state.episodes.values(), key=lambda e: (e.pub_datetime, e.position), reverse=True
+    )
+    used = 0
+    dropped = 0
+    for index, episode in enumerate(newest_first):
+        path = cfg.media_dir / episode.filename
+        size = path.stat().st_size if path.exists() else episode.size
+        # Always keep the newest episode, even if it alone blows the budget —
+        # an empty feed is worse than a slightly oversized one.
+        if index == 0 or used + size <= budget:
+            used += size
+            if index == 0 and size > budget:
+                log(
+                    f"warning: newest episode is {human_bytes(size)}, over the "
+                    f"{cfg.max_total_mb} MiB budget — keeping it anyway"
+                )
+            continue
+        path.unlink(missing_ok=True)
+        state.episodes.pop(episode.video_id, None)
+        state.evicted.add(episode.video_id)
+        dropped += 1
+
+    if dropped:
+        log(
+            f"disk budget: dropped {dropped} old episode(s), "
+            f"now using {human_bytes(used)} of {cfg.max_total_mb} MiB"
+        )
+    return dropped
+
+
 def sync(cfg: Config) -> None:
     if shutil.which("ffmpeg") is None:
         die("ffmpeg is required to extract audio — install it and try again")
@@ -442,6 +499,12 @@ def sync(cfg: Config) -> None:
     download_cover(cfg, info, state)
 
     wanted = {entry["id"] for entry in entries}
+    if cfg.max_total_mb <= 0:
+        # Budget switched off, so backfill anything it evicted previously. This
+        # has to happen before the download loop, which skips evicted videos.
+        state.evicted.clear()
+    else:
+        state.evicted &= wanted  # stop tracking videos that left the playlist
     new_count = 0
     for position, entry in enumerate(entries):
         video_id = entry["id"]
@@ -449,6 +512,8 @@ def sync(cfg: Config) -> None:
         if existing and (cfg.media_dir / existing.filename).exists():
             existing.position = position
             continue
+        if video_id in state.evicted:
+            continue  # the disk budget already dropped this one
         episode = download_episode(cfg, entry, position)
         if episode is None:
             continue
@@ -466,6 +531,8 @@ def sync(cfg: Config) -> None:
         for stray in cfg.media_dir.iterdir():
             if stray.is_file() and stray.name not in {e.filename for e in state.episodes.values()}:
                 stray.unlink(missing_ok=True)
+
+    removed += enforce_disk_budget(cfg, state)
 
     state.save(cfg.state_path)
     write_feed(cfg, state)

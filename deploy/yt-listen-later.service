@@ -1,0 +1,38 @@
+[Unit]
+Description=yt-listen-later podcast feed server
+Documentation=https://github.com/svandragt/yt-listen-later
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ytll
+Group=ytll
+WorkingDirectory=/srv/yt-listen-later
+# uv resolves the script's inline dependencies on first run and caches them.
+ExecStart=/usr/local/bin/uv run ./yt_listen_later.py serve
+Restart=on-failure
+RestartSec=5s
+
+# Only ever bind to loopback; the reverse proxy terminates TLS in front.
+Environment=HOST=127.0.0.1
+
+# Hardening: the service needs to read its own directory and nothing else.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=yes
+LockPersonality=yes
+ReadWritePaths=/srv/yt-listen-later
+# uv needs a writable cache and home.
+Environment=HOME=/srv/yt-listen-later
+Environment=XDG_CACHE_HOME=/srv/yt-listen-later/.cache
+
+[Install]
+WantedBy=multi-user.target

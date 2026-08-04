@@ -45,13 +45,16 @@ def fake_fetch(cfg):
     return info, entries
 
 
+SIZES: dict[str, int] = {}  # video id -> bytes, for disk-budget tests
+
+
 def fake_download(cfg, entry, position):
     vid = entry["id"]
     downloads.append(vid)
     if vid in FAIL:
         return None
     path = cfg.media_dir / f"{vid}.m4a"
-    path.write_bytes(os.urandom(1000 + position))
+    path.write_bytes(b"\0" * SIZES.get(vid, 1000 + position))
     return m.Episode(
         video_id=vid, title=f"Video {vid}", filename=path.name, size=path.stat().st_size,
         duration=600 + position, description=f"desc {vid}", uploader="Chan",
@@ -154,5 +157,73 @@ parsed = [parsedate_to_datetime(d) for d in dates]
 assert parsed == sorted(parsed, reverse=True), dates
 assert all(g.startswith("yt:video:") for g in guids), guids
 print("PASS feed is newest-first with stable guids")
+
+# --- disk budget (MAX_TOTAL_MB) --------------------------------------------
+MIB = 1024 * 1024
+
+
+def reset(playlist, **env):
+    """Start from a clean feed/state with a known playlist and env."""
+    shutil.rmtree(cfg.public_dir, ignore_errors=True)
+    PLAYLIST[:] = playlist
+    SIZES.clear()
+    downloads.clear()
+    os.environ.update(MAX_EPISODES="0", MAX_TOTAL_MB="0", PRUNE_REMOVED="true")
+    os.environ.update(env)
+    return m.load_config(None)
+
+
+def state():
+    return m.State.load(cfg.state_path)
+
+
+# 10. the budget evicts oldest episodes, keeping the newest that fit
+c = reset(["v1", "v2", "v3", "v4"], MAX_TOTAL_MB="2")
+SIZES.update({v: MIB for v in PLAYLIST})
+m.sync(c)
+# positions 0..3 map to July 1..4, so v4 is newest
+assert media() == ["v3.m4a", "v4.m4a"], media()
+assert items() == ["Video v4", "Video v3"], items()
+print("PASS disk budget keeps the newest episodes that fit")
+
+# 11. the churn guard: evicted episodes are not re-downloaded next sync
+downloads.clear()
+m.sync(c)
+assert downloads == [], f"re-downloaded evicted episodes: {downloads}"
+assert media() == ["v3.m4a", "v4.m4a"], media()
+print("PASS evicted episodes are not re-downloaded on the next sync")
+
+# 12. evictions are recorded in the state file and survive a reload
+assert state().evicted == {"v1", "v2"}, state().evicted
+print("PASS evictions persist in state.json")
+
+# 13. an evicted video that leaves the playlist stops being tracked
+PLAYLIST.remove("v1")
+m.sync(c)
+assert state().evicted == {"v2"}, state().evicted
+print("PASS evictions are forgotten once the video leaves the playlist")
+
+# 14. turning the budget off backfills what was evicted
+c_off = reset(["v1", "v2", "v3", "v4"], MAX_TOTAL_MB="2")
+SIZES.update({v: MIB for v in PLAYLIST})
+m.sync(c_off)
+assert len(media()) == 2, media()
+os.environ["MAX_TOTAL_MB"] = "0"
+c_off = m.load_config(None)
+downloads.clear()
+m.sync(c_off)
+assert sorted(media()) == ["v1.m4a", "v2.m4a", "v3.m4a", "v4.m4a"], media()
+assert sorted(downloads) == ["v1", "v2"], downloads
+assert state().evicted == set(), state().evicted
+print("PASS clearing MAX_TOTAL_MB backfills previously evicted episodes")
+
+# 15. a single episode larger than the whole budget is still kept
+c_big = reset(["big"], MAX_TOTAL_MB="1")
+SIZES["big"] = 3 * MIB
+m.sync(c_big)
+assert media() == ["big.m4a"], media()
+assert len(items()) == 1, items()
+print("PASS an oversized newest episode is kept rather than leaving an empty feed")
+
 shutil.rmtree(ROOT, ignore_errors=True)
 print("\nALL SYNC TESTS PASSED")
