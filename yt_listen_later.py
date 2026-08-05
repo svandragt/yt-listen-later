@@ -748,17 +748,24 @@ def serve(cfg: Config) -> None:
 
 
 def run(cfg: Config) -> None:
-    sync(cfg)
+    # Sync in the background so the last-known-good feed and audio stay
+    # servable throughout — including the first sync, which can take a while
+    # and would otherwise leave the HTTP port unreachable until it finishes.
+    def safe_sync(label: str) -> None:
+        try:
+            sync(cfg)
+        except SystemExit as exc:
+            log(f"{label} failed: {exc}")
+        except Exception as exc:  # keep serving even if a sync breaks
+            log(f"{label} failed: {exc!r}")
+
+    threading.Thread(target=safe_sync, args=("sync",), daemon=True, name="sync").start()
+
     if cfg.refresh_minutes > 0:
         def loop() -> None:
             while True:
                 time.sleep(cfg.refresh_minutes * 60)
-                try:
-                    sync(cfg)
-                except SystemExit as exc:
-                    log(f"refresh failed: {exc}")
-                except Exception as exc:  # keep serving even if a refresh breaks
-                    log(f"refresh failed: {exc!r}")
+                safe_sync("refresh")
 
         threading.Thread(target=loop, daemon=True, name="refresh").start()
         log(f"will re-sync every {cfg.refresh_minutes} minute(s)")
