@@ -144,7 +144,10 @@ def load_config(env_file: str | None) -> Config:
         base_url = f"http://{local_ip()}:{port}"
         log(f"BASE_URL not set, guessing {base_url} (fine on a LAN, not for Overcast over the internet)")
 
+    cookies_from_browser = (os.environ.get("COOKIES_FROM_BROWSER") or "").strip() or None
     cookie_file = os.environ.get("COOKIE_FILE", "").strip()
+    if cookies_from_browser and cookie_file:
+        die("set only one of COOKIES_FROM_BROWSER or COOKIE_FILE, not both")
     return Config(
         playlist=playlist,
         base_url=base_url,
@@ -166,7 +169,7 @@ def load_config(env_file: str | None) -> Config:
         host=os.environ.get("HOST", "0.0.0.0").strip() or "0.0.0.0",
         port=port,
         refresh_minutes=env_int("REFRESH_MINUTES", 60),
-        cookies_from_browser=(os.environ.get("COOKIES_FROM_BROWSER") or "").strip() or None,
+        cookies_from_browser=cookies_from_browser,
         cookie_file=Path(cookie_file).expanduser() if cookie_file else None,
     )
 
