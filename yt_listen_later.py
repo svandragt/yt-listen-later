@@ -320,7 +320,15 @@ class State:
 
 
 def ydl_common_opts(cfg: Config) -> dict:
-    opts: dict = {"quiet": True, "no_warnings": True, "noprogress": True}
+    # Lets yt-dlp fetch its JS challenge-solver script (needs a JS runtime,
+    # e.g. deno, to actually run it) — without it, YouTube forces a client
+    # into URL-less SABR streaming and every download fails.
+    opts: dict = {
+        "quiet": True,
+        "no_warnings": True,
+        "noprogress": True,
+        "remote_components": {"ejs:github"},
+    }
     if cfg.cookies_from_browser:
         opts["cookiesfrombrowser"] = (cfg.cookies_from_browser,)
     if cfg.cookie_file:
