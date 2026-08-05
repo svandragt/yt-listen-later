@@ -2,8 +2,9 @@
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
-#     "yt-dlp>=2024.8.6",
+#     "yt-dlp>=2025.5.22",
 #     "python-dotenv>=1.0.1",
+#     "bgutil-ytdlp-pot-provider>=1.0.0",
 # ]
 # ///
 """Turn a YouTube playlist into a podcast RSS feed you can subscribe to in Overcast.
@@ -87,6 +88,7 @@ class Config:
     refresh_minutes: int
     cookies_from_browser: str | None
     cookie_file: Path | None
+    pot_provider_url: str | None
 
     @property
     def media_dir(self) -> Path:
@@ -171,6 +173,7 @@ def load_config(env_file: str | None) -> Config:
         refresh_minutes=env_int("REFRESH_MINUTES", 60),
         cookies_from_browser=cookies_from_browser,
         cookie_file=Path(cookie_file).expanduser() if cookie_file else None,
+        pot_provider_url=(os.environ.get("POT_PROVIDER_URL") or "").strip() or None,
     )
 
 
@@ -324,6 +327,8 @@ def ydl_common_opts(cfg: Config) -> dict:
         if not cfg.cookie_file.exists():
             die(f"COOKIE_FILE does not exist: {cfg.cookie_file}")
         opts["cookiefile"] = str(cfg.cookie_file)
+    if cfg.pot_provider_url:
+        opts["extractor_args"] = {"youtubepot-bgutilhttp": {"base_url": [cfg.pot_provider_url]}}
     return opts
 
 

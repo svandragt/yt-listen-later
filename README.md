@@ -156,6 +156,11 @@ laptop. On a server prefer the systemd timer above, or plain cron:
   backfills them on the next run.
 - Private or age-gated playlists need cookies; see `COOKIES_FROM_BROWSER` and
   `COOKIE_FILE` in `.env.example`.
+- YouTube requires a PO token for datacenter IPs (any VPS) before it'll return
+  audio formats, even with valid cookies — without one every download fails
+  with "Requested format is not available". Docker runs a bundled
+  `pot-provider` service for this automatically; see `POT_PROVIDER_URL` in
+  `.env.example` if running outside Docker.
 
 ## Tests
 
