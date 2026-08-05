@@ -9,6 +9,11 @@ RUN apt-get update \
 # Pinned rather than :latest so image builds are reproducible.
 COPY --from=ghcr.io/astral-sh/uv:0.8.17 /uv /usr/local/bin/uv
 
+# yt-dlp needs a JS runtime to solve YouTube's "n" throttling challenge;
+# without one it falls back to a client YouTube forces into URL-less SABR
+# streaming, and every download fails with "Requested format is not available".
+COPY --from=denoland/deno:bin-2.9.4 /deno /usr/local/bin/deno
+
 ENV UV_CACHE_DIR=/opt/uv-cache \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
