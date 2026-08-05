@@ -24,7 +24,9 @@ COPY yt_listen_later.py ./
 #   - nothing invokes uv at runtime, so starting a container needs no network,
 #     no dependency resolution, and no write access to the uv cache.
 RUN uv sync --script yt_listen_later.py \
-	&& ln -s "$(uv python find --script yt_listen_later.py)" /usr/local/bin/app-python \
+	&& venv_python="$(find /opt/uv-cache/environments-v2 -maxdepth 3 -name python -path '*/bin/*')" \
+	&& printf '#!/bin/sh\nexec "%s" "$@"\n' "$venv_python" > /usr/local/bin/app-python \
+	&& chmod +x /usr/local/bin/app-python \
 	&& chmod -R a+rX /opt/uv-cache \
 	&& app-python -c "import yt_dlp, dotenv"
 
