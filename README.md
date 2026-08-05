@@ -93,9 +93,9 @@ Set `BASE_URL` to the same hostname, then subscribe in Overcast to
 ### Day-to-day
 
 ```sh
-docker compose exec yt-listen-later sync    # sync now, don't wait for the timer
-docker compose exec yt-listen-later feed    # rebuild feed.xml after editing .env
-docker compose run --rm yt-listen-later ./test_yt_listen_later.py
+docker compose exec yt-listen-later app-python /app/yt_listen_later.py sync   # sync now, don't wait for the timer
+docker compose exec yt-listen-later app-python /app/yt_listen_later.py feed   # rebuild feed.xml after editing .env
+docker compose run --rm yt-listen-later app-python /app/test_yt_listen_later.py
 docker compose up -d --build               # upgrade after a git pull
 docker compose logs -f yt-listen-later
 ```
