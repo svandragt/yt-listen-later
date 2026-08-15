@@ -9,7 +9,7 @@ import shutil
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent / "yt_listen_later.py"
@@ -224,6 +224,38 @@ m.sync(c_big)
 assert media() == ["big.m4a"], media()
 assert len(items()) == 1, items()
 print("PASS an oversized newest episode is kept rather than leaving an empty feed")
+
+# --- failed downloads (retry backoff) ---------------------------------------
+
+# 16. a repeatedly failing video starts backing off instead of retrying hourly
+c_fail = reset(["f1"])
+FAIL.add("f1")
+m.sync(c_fail)  # first failure still retries on the next run (test 4's contract)
+assert downloads == ["f1"], downloads
+downloads.clear()
+m.sync(c_fail)  # second failure starts the backoff
+assert downloads == ["f1"], downloads
+assert state().failures["f1"]["count"] == 2, state().failures
+downloads.clear()
+m.sync(c_fail)
+assert downloads == [], f"retried inside the backoff window: {downloads}"
+print("PASS a repeatedly failing download backs off instead of retrying every sync")
+
+# 17. past the backoff window it retries, and success clears the failure record
+stale = state()
+stale.failures["f1"]["last"] = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+stale.save(c_fail.state_path)
+FAIL.discard("f1")
+downloads.clear()
+m.sync(c_fail)
+assert downloads == ["f1"], downloads
+assert state().failures == {}, state().failures
+assert media() == ["f1.m4a"], media()
+print("PASS a recovered video retries after the backoff and clears its failure record")
+
+# 18. the delay doubles per failure and is capped, so nothing is dropped forever
+assert [m.retry_delay_hours(n) for n in (1, 2, 3, 5, 99)] == [0, 1, 2, 8, 12]
+print("PASS retry delay backs off exponentially up to the cap")
 
 shutil.rmtree(ROOT, ignore_errors=True)
 print("\nALL SYNC TESTS PASSED")

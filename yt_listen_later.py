@@ -29,7 +29,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -280,6 +280,11 @@ class State:
     # Videos dropped by the disk budget. Remembered so the next sync doesn't
     # re-download what it is only going to evict again.
     evicted: set[str] = field(default_factory=set)
+    # Videos whose download failed, as {video_id: {"count": n, "last": iso}}.
+    # Retried with backoff rather than dropped: the usual cause is a transient
+    # block (expired cookies, a dead pot-provider), and those videos have to
+    # come back on their own once the cause is fixed.
+    failures: dict[str, dict] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path) -> "State":
@@ -299,6 +304,7 @@ class State:
             playlist_url=raw.get("playlist_url", ""),
             cover=raw.get("cover", ""),
             evicted=set(raw.get("evicted") or []),
+            failures=dict(raw.get("failures") or {}),
         )
 
     def save(self, path: Path) -> None:
@@ -308,6 +314,7 @@ class State:
             "playlist_url": self.playlist_url,
             "cover": self.cover,
             "evicted": sorted(self.evicted),
+            "failures": self.failures,
             "episodes": {vid: ep.to_dict() for vid, ep in self.episodes.items()},
         }
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -317,6 +324,26 @@ class State:
 
 
 # --------------------------------------------------------------------------- sync
+
+# Capped well inside infra-puffin's 25h monitor window (check-yt-sync.sh), so a
+# permanently failing video always logs at least one `skipping` line per window
+# for it to count. Raising this above ~12h narrows that margin.
+RETRY_CAP_HOURS = 12
+
+
+def retry_delay_hours(count: int) -> int:
+    """A first failure retries on the next sync; after that 1h, 2h, 4h … capped."""
+    if count < 2:
+        return 0
+    return min(2 ** (count - 2), RETRY_CAP_HOURS)
+
+
+def retry_due(failure: dict, now: datetime) -> bool:
+    try:
+        last = datetime.fromisoformat(failure["last"])
+    except (KeyError, TypeError, ValueError):
+        return True  # unparseable state, so give the video another go
+    return now - last >= timedelta(hours=retry_delay_hours(failure.get("count", 1)))
 
 
 def ydl_common_opts(cfg: Config) -> dict:
@@ -521,7 +548,10 @@ def sync(cfg: Config) -> None:
         state.evicted.clear()
     else:
         state.evicted &= wanted  # stop tracking videos that left the playlist
+    state.failures = {v: f for v, f in state.failures.items() if v in wanted}
     new_count = 0
+    waiting = 0
+    now = datetime.now(timezone.utc)
     for position, entry in enumerate(entries):
         video_id = entry["id"]
         existing = state.episodes.get(video_id)
@@ -530,9 +560,18 @@ def sync(cfg: Config) -> None:
             continue
         if video_id in state.evicted:
             continue  # the disk budget already dropped this one
+        failure = state.failures.get(video_id)
+        if failure and not retry_due(failure, now):
+            waiting += 1
+            continue
         episode = download_episode(cfg, entry, position)
         if episode is None:
+            count = (failure or {}).get("count", 0) + 1
+            state.failures[video_id] = {"count": count, "last": now.isoformat()}
+            log(f"{video_id} has failed {count}×, next retry in {retry_delay_hours(count)}h")
+            state.save(cfg.state_path)
             continue
+        state.failures.pop(video_id, None)
         state.episodes[video_id] = episode
         new_count += 1
         state.save(cfg.state_path)  # checkpoint, so a crash doesn't redo everything
@@ -556,6 +595,11 @@ def sync(cfg: Config) -> None:
         f"{len(state.episodes)} episode(s) in feed "
         f"(+{new_count} new, -{removed} removed) → {cfg.feed_path}"
     )
+    if state.failures:
+        log(
+            f"{len(state.failures)} video(s) failing, {waiting} waiting on backoff: "
+            f"{', '.join(sorted(state.failures))}"
+        )
     log(f"subscribe in Overcast with: {cfg.url_for(cfg.feed_name)}")
 
 

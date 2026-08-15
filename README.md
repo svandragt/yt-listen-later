@@ -135,8 +135,8 @@ Pass a subcommand to override the default: `docker run --rm ... yt-listen-later 
 
 ## Keeping it fresh
 
-`run` re-syncs every `REFRESH_MINUTES` in-process, which is convenient on a
-laptop. On a server prefer the systemd timer above, or plain cron:
+`run` re-syncs every `REFRESH_MINUTES` in-process, and that's what the Docker
+deployment above uses. Outside Docker, plain cron works too:
 
 ```sh
 */30 * * * * cd /srv/yt-listen-later && /usr/local/bin/uv run ./yt_listen_later.py sync >> sync.log 2>&1
@@ -154,6 +154,12 @@ laptop. On a server prefer the systemd timer above, or plain cron:
 - `MAX_TOTAL_MB` evictions are remembered in the state file, so a capped feed
   doesn't re-download the same old episode every sync forever. Clearing the cap
   backfills them on the next run.
+- A video that fails to download is retried on the next sync, then backed off
+  exponentially (1h, 2h, 4h … capped at 12h) and reported in the sync summary.
+  Failures are never permanent: the usual cause is a transient block rather than
+  a bad video, so everything still failing recovers by itself once the cause is
+  fixed. `1 video(s) failing` in the log with no progress over a day means the
+  block is real — start with cookies and `pot-provider`, below.
 - Private or age-gated playlists need cookies; see `COOKIES_FROM_BROWSER` and
   `COOKIE_FILE` in `.env.example`.
 - YouTube requires a PO token for datacenter IPs (any VPS) before it'll return
