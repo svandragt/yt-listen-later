@@ -103,6 +103,32 @@ docker compose logs -f yt-listen-later
 Everything mutable lives in `./data` — audio, `feed.xml`, and the state file — so
 that's the only thing to back up, and destroying the container loses nothing.
 
+### Cookies
+
+A server needs them. YouTube answers *"Sign in to confirm you're not a bot"* for
+nearly every video from a datacentre IP, so without cookies a deployment syncs
+`+0 new` forever while looking perfectly healthy.
+
+Export your YouTube cookies in Netscape format and drop them at `data/cookies.txt`
+— compose already points `COOKIE_FILE` there, so nothing else needs configuring:
+
+```sh
+install -m 600 -o 1000 -g 1000 cookies.txt data/cookies.txt
+docker compose exec yt-listen-later /app/docker-entrypoint.sh sync
+```
+
+Export **only** `youtube.com`, not your whole browser — a full dump ships every
+site's session cookies to the server for no benefit. `0600` owned by uid 1000
+matches the container's `app` user.
+
+Cookies expire every few months, and the symptom is silent: syncs keep succeeding
+with `+0 new`. A working sync says `+N new`, so that number is the thing to check —
+`+0 new` on its own only means the playlist hasn't changed, but `+0 new` while
+you're waiting on a video you definitely added means the cookies have lapsed.
+Re-export and re-run the sync above. A missing or expired file logs
+`COOKIE_FILE does not exist, continuing without cookies` and keeps serving the
+existing feed rather than taking the service down.
+
 ### Notes for a small VPS
 
 Disk is usually the binding constraint, and audio accumulates quietly:
@@ -160,8 +186,9 @@ deployment above uses. Outside Docker, plain cron works too:
   a bad video, so everything still failing recovers by itself once the cause is
   fixed. `1 video(s) failing` in the log with no progress over a day means the
   block is real — start with cookies and `pot-provider`, below.
-- Private or age-gated playlists need cookies; see `COOKIES_FROM_BROWSER` and
-  `COOKIE_FILE` in `.env.example`.
+- Cookies are needed for private and age-gated videos, and in practice for any
+  server deployment at all — see [Cookies](#cookies) above, plus
+  `COOKIES_FROM_BROWSER` and `COOKIE_FILE` in `.env.example`.
 - YouTube requires a PO token for datacenter IPs (any VPS) before it'll return
   audio formats, even with valid cookies — without one every download fails
   with "Requested format is not available". Docker runs a bundled

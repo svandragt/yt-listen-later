@@ -257,5 +257,33 @@ print("PASS a recovered video retries after the backoff and clears its failure r
 assert [m.retry_delay_hours(n) for n in (1, 2, 3, 5, 99)] == [0, 1, 2, 8, 12]
 print("PASS retry delay backs off exponentially up to the cap")
 
+# --- cookies ----------------------------------------------------------------
+
+# 19. a missing COOKIE_FILE warns and carries on rather than exiting at boot
+c_cookie = reset(["c1"])
+os.environ["COOKIE_FILE"] = str(ROOT / "nope.txt")
+opts = m.ydl_common_opts(m.load_config(None))
+assert "cookiefile" not in opts, opts
+print("PASS a missing COOKIE_FILE is skipped instead of killing the process")
+
+# 20. a cookie file that exists is handed to yt-dlp
+(ROOT / "cookies.txt").write_text("# Netscape HTTP Cookie File\n")
+os.environ["COOKIE_FILE"] = str(ROOT / "cookies.txt")
+opts = m.ydl_common_opts(m.load_config(None))
+assert opts["cookiefile"] == str(ROOT / "cookies.txt"), opts
+del os.environ["COOKIE_FILE"]
+print("PASS an existing COOKIE_FILE is passed through to yt-dlp")
+
+# 21. asking for both cookie sources is still a hard error
+os.environ.update(COOKIE_FILE=str(ROOT / "cookies.txt"), COOKIES_FROM_BROWSER="firefox")
+try:
+    m.load_config(None)
+except SystemExit:
+    pass
+else:
+    raise AssertionError("expected COOKIE_FILE + COOKIES_FROM_BROWSER to be rejected")
+del os.environ["COOKIE_FILE"], os.environ["COOKIES_FROM_BROWSER"]
+print("PASS setting both cookie sources is still rejected")
+
 shutil.rmtree(ROOT, ignore_errors=True)
 print("\nALL SYNC TESTS PASSED")

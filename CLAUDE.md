@@ -67,9 +67,14 @@ Key invariants worth knowing before touching sync logic:
 Most sync failures are here, not in the code above. Three separate mechanisms, each
 with its own failure signature — check them in this order before suspecting `sync`:
 
-1. **Cookies** — `COOKIES_FROM_BROWSER` / `COOKIE_FILE`, needed for private and
-   age-gated videos. Setting both is rejected at load; a missing `COOKIE_FILE` is a
-   hard `die()`, not a skip. Expiry looks like `Sign in to confirm you're not a bot`.
+1. **Cookies** — `COOKIES_FROM_BROWSER` / `COOKIE_FILE`. Not just for private and
+   age-gated videos: without them a datacenter IP gets `Sign in to confirm you're
+   not a bot` for nearly everything, so a server deployment needs them. Compose
+   fixes `COOKIE_FILE` at `/data/cookies.txt`; a missing or expired file warns and
+   syncs on without cookies rather than failing to boot. Setting both sources is
+   still rejected at load — and since Compose always sets `COOKIE_FILE`, putting
+   `COOKIES_FROM_BROWSER` in `.env` will `die()` there (it can't work in a
+   container anyway, as there's no browser to read).
 2. **PO tokens** — YouTube won't return audio formats to a datacenter IP without one.
    Compose runs a `pot-provider` sidecar and points `POT_PROVIDER_URL` at it; it's
    `depends_on` only, so it can be up but unhealthy. Absence looks like

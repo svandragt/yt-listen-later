@@ -359,9 +359,14 @@ def ydl_common_opts(cfg: Config) -> dict:
     if cfg.cookies_from_browser:
         opts["cookiesfrombrowser"] = (cfg.cookies_from_browser,)
     if cfg.cookie_file:
-        if not cfg.cookie_file.exists():
-            die(f"COOKIE_FILE does not exist: {cfg.cookie_file}")
-        opts["cookiefile"] = str(cfg.cookie_file)
+        # Missing cookies are degraded service, not a misconfiguration: the file
+        # is bind-mounted and expires, so a first run or a lapsed export would
+        # otherwise boot-loop the container. Downloads fail per-video with a
+        # clear reason instead, which sync already handles.
+        if cfg.cookie_file.exists():
+            opts["cookiefile"] = str(cfg.cookie_file)
+        else:
+            log(f"COOKIE_FILE does not exist, continuing without cookies: {cfg.cookie_file}")
     if cfg.pot_provider_url:
         opts["extractor_args"] = {"youtubepot-bgutilhttp": {"base_url": [cfg.pot_provider_url]}}
     return opts
