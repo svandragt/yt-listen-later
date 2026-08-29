@@ -33,7 +33,8 @@ RUN uv sync --script yt_listen_later.py \
 	&& printf '#!/bin/sh\nexec "%s" "$@"\n' "$venv_python" > /usr/local/bin/app-python \
 	&& chmod +x /usr/local/bin/app-python \
 	&& chmod -R a+rX /opt/uv-cache \
-	&& app-python -c "import yt_dlp, dotenv"
+	&& app-python -c "import yt_dlp, dotenv" \
+	&& app-python /app/yt_listen_later.py doctor
 
 COPY test_yt_listen_later.py docker-entrypoint.sh ./
 RUN chmod +x docker-entrypoint.sh

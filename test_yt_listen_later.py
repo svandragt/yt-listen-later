@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["yt-dlp", "python-dotenv"]
+# dependencies = ["yt-dlp==2026.8.19", "python-dotenv", "bgutil-ytdlp-pot-provider==1.3.2"]
 # ///
 """Exercise sync()'s state handling, resume and prune logic with stubbed network."""
 import importlib.util
@@ -284,6 +284,14 @@ else:
     raise AssertionError("expected COOKIE_FILE + COOKIES_FROM_BROWSER to be rejected")
 del os.environ["COOKIE_FILE"], os.environ["COOKIES_FROM_BROWSER"]
 print("PASS setting both cookie sources is still rejected")
+
+# --- pot provider -----------------------------------------------------------
+
+# 22. the bgutil POT provider registers with yt-dlp; an empty registry means a
+# datacenter IP gets bot-blocked and sync silently stops gaining episodes
+problem = m.check_pot_provider()
+assert problem is None, problem
+print("PASS the bgutil POT provider registers with yt-dlp")
 
 shutil.rmtree(ROOT, ignore_errors=True)
 print("\nALL SYNC TESTS PASSED")
