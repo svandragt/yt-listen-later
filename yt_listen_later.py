@@ -2,9 +2,13 @@
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
-#     "yt-dlp>=2025.5.22",
+#     # yt-dlp and the POT provider are pinned as a tested pair: a floating
+#     # version let a nightly rebuild bump one without the other and silently
+#     # split them (POT stopped registering, sync stopped gaining episodes).
+#     # Bump both together and run `doctor` to confirm the provider registers.
+#     "yt-dlp==2026.8.19",
 #     "python-dotenv>=1.0.1",
-#     "bgutil-ytdlp-pot-provider>=1.0.0",
+#     "bgutil-ytdlp-pot-provider==1.3.2",
 # ]
 # ///
 """Turn a YouTube playlist into a podcast RSS feed you can subscribe to in Overcast.
@@ -370,6 +374,36 @@ def ydl_common_opts(cfg: Config) -> dict:
     if cfg.pot_provider_url:
         opts["extractor_args"] = {"youtubepot-bgutilhttp": {"base_url": [cfg.pot_provider_url]}}
     return opts
+
+
+def check_pot_provider() -> str | None:
+    """Return a problem description if yt-dlp can't register the bgutil POT
+    provider, else None.
+
+    Without a POT token a datacenter IP is bot-blocked on nearly every fresh
+    extraction. The provider ships as a yt-dlp plugin; if the environment ends
+    up with it reachable twice on yt-dlp's plugin search path, the second
+    registration asserts, yt-dlp swallows the error, and the registry is left
+    empty — so sync silently stops gaining new episodes. Fail loudly instead.
+    """
+    import contextlib
+    import io
+
+    captured = io.StringIO()
+    with contextlib.redirect_stderr(captured), contextlib.redirect_stdout(captured):
+        from yt_dlp import YoutubeDL
+
+        YoutubeDL({"no_warnings": True})  # constructing loads the plugins
+        # Private registry: no public API exposes registered providers. Pinned
+        # to the yt-dlp in the header, so a bump that moves it fails here loudly.
+        from yt_dlp.extractor.youtube.pot._registry import _pot_providers
+
+        registered = set(_pot_providers.value)
+    if "already registered" in captured.getvalue():
+        return "bgutil POT plugin registered twice (duplicate on yt-dlp's plugin path):\n" + captured.getvalue().strip()
+    if "BgUtilHTTP" not in registered:
+        return f"bgutil POT provider not registered with yt-dlp; registry has {sorted(registered)}"
+    return None
 
 
 def fetch_playlist(cfg: Config) -> tuple[dict, list[dict]]:
@@ -834,7 +868,15 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("feed", help="rebuild feed.xml from existing state without downloading")
     sub.add_parser("serve", help="serve the feed and audio over HTTP")
     sub.add_parser("run", help="sync, then serve and re-sync periodically")
+    sub.add_parser("doctor", help="check the bgutil POT provider registers with yt-dlp")
     args = parser.parse_args(argv)
+
+    if args.command == "doctor":
+        problem = check_pot_provider()
+        if problem:
+            die(f"POT provider check failed: {problem}")
+        log("POT provider OK: bgutil registered with yt-dlp")
+        return 0
 
     cfg = load_config(args.env_file)
     if args.command == "sync":

@@ -79,15 +79,23 @@ with its own failure signature — check them in this order before suspecting `s
    Compose runs a `pot-provider` sidecar and points `POT_PROVIDER_URL` at it; it's
    `depends_on` only, so it can be up but unhealthy. Absence looks like
    `Requested format is not available`, and a bare `Video unavailable` for a video
-   that plays fine elsewhere generally means the request was blocked by IP.
+   that plays fine elsewhere generally means the request was blocked by IP. The POT
+   token comes from the `bgutil-ytdlp-pot-provider` yt-dlp plugin. If that plugin is
+   reachable twice on yt-dlp's plugin path, the second registration asserts, yt-dlp
+   swallows the error, and the provider silently drops out — playlist listing still
+   works, so the feed keeps updating and only *new* videos fail forever. `app-python
+   /app/yt_listen_later.py doctor` fails loudly when the provider isn't registered;
+   the Docker build runs it, so a broken build can't ship.
 3. **yt-dlp itself** — needs a JS runtime for the "n" challenge (deno, in the image)
    and fetches a remote challenge-solver script at runtime.
 
-The version trap: the PEP 723 header pins `yt-dlp>=2025.5.22`, a floor with no
-ceiling, and the Docker image resolves it at **build** time. The container therefore
-stays on whatever was current when the image was last built while YouTube keeps
-changing. Check `app-python -m yt_dlp --version` against the latest release before
-digging further — `docker compose up -d --build` is the fix.
+The version trap: the PEP 723 header pins `yt-dlp` and `bgutil-ytdlp-pot-provider` to
+exact versions — a tested pair, because a floating floor let a nightly rebuild bump
+one without the other and split them. The Docker image resolves them at **build**
+time, so the container stays on the pinned versions until someone bumps them. Bump
+both together, then run `doctor` to confirm the provider still registers. Check
+`app-python -m yt_dlp --version` against the latest release before digging further —
+`docker compose up -d --build` after a bump is the fix.
 
 Docker deployment builds the PEP 723 dependencies at image-build time (`uv sync
 --script`) and symlinks the resulting interpreter to `app-python`, so the running
