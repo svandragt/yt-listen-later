@@ -93,6 +93,7 @@ class Config:
     cookies_from_browser: str | None
     cookie_file: Path | None
     pot_provider_url: str | None
+    player_client: list[str]
 
     @property
     def media_dir(self) -> Path:
@@ -178,6 +179,11 @@ def load_config(env_file: str | None) -> Config:
         cookies_from_browser=cookies_from_browser,
         cookie_file=Path(cookie_file).expanduser() if cookie_file else None,
         pot_provider_url=(os.environ.get("POT_PROVIDER_URL") or "").strip() or None,
+        # yt-dlp's default client (visionos) never fetches a POT and gets
+        # hard bot-blocked from a datacenter IP. A web client fetches a GVS PO
+        # token via the provider, which is what makes a server deployment work.
+        # A knob because YouTube keeps changing which client survives.
+        player_client=[c.strip() for c in os.environ.get("YT_PLAYER_CLIENT", "web_safari").split(",") if c.strip()],
     )
 
 
@@ -371,8 +377,13 @@ def ydl_common_opts(cfg: Config) -> dict:
             opts["cookiefile"] = str(cfg.cookie_file)
         else:
             log(f"COOKIE_FILE does not exist, continuing without cookies: {cfg.cookie_file}")
+    extractor_args: dict = {}
+    if cfg.player_client:
+        extractor_args["youtube"] = {"player_client": cfg.player_client}
     if cfg.pot_provider_url:
-        opts["extractor_args"] = {"youtubepot-bgutilhttp": {"base_url": [cfg.pot_provider_url]}}
+        extractor_args["youtubepot-bgutilhttp"] = {"base_url": [cfg.pot_provider_url]}
+    if extractor_args:
+        opts["extractor_args"] = extractor_args
     return opts
 
 
