@@ -86,6 +86,15 @@ with its own failure signature — check them in this order before suspecting `s
    works, so the feed keeps updating and only *new* videos fail forever. `app-python
    /app/yt_listen_later.py doctor` fails loudly when the provider isn't registered;
    the Docker build runs it, so a broken build can't ship.
+
+   Registration is necessary but not sufficient: yt-dlp only fetches a POT for
+   certain player clients. Its default (`visionos`) never calls the provider and gets
+   hard bot-blocked from a datacenter IP — the sidecar log stays silent while every
+   download bot-fails, and `doctor` still passes because the provider *is* registered.
+   `YT_PLAYER_CLIENT` (default `web_safari`) forces a web client that fetches a GVS PO
+   token; the sidecar logging `Generating POT` is the proof it's being used. A yt-dlp
+   bump that changes the default client re-triggers this, so verify a real download,
+   not just `doctor`, after bumping.
 3. **yt-dlp itself** — needs a JS runtime for the "n" challenge (deno, in the image)
    and fetches a remote challenge-solver script at runtime.
 

@@ -293,5 +293,20 @@ problem = m.check_pot_provider()
 assert problem is None, problem
 print("PASS the bgutil POT provider registers with yt-dlp")
 
+# 23. a web player_client is forced, so yt-dlp fetches a POT instead of falling
+# back to the default client that gets bot-blocked without ever calling the
+# provider — and it doesn't clobber the provider's own base_url arg
+c_pot = reset(["p1"], POT_PROVIDER_URL="http://pot:4416")
+ea = m.ydl_common_opts(c_pot)["extractor_args"]
+assert ea["youtube"]["player_client"] == ["web_safari"], ea
+assert ea["youtubepot-bgutilhttp"]["base_url"] == ["http://pot:4416"], ea
+print("PASS a web player_client is forced alongside the POT provider arg")
+
+# 24. the player client list is configurable for when YouTube shifts again
+c_pc = reset(["p1"], YT_PLAYER_CLIENT="web_safari, web")
+assert m.ydl_common_opts(c_pc)["extractor_args"]["youtube"]["player_client"] == ["web_safari", "web"]
+del os.environ["YT_PLAYER_CLIENT"]
+print("PASS YT_PLAYER_CLIENT overrides the player client list")
+
 shutil.rmtree(ROOT, ignore_errors=True)
 print("\nALL SYNC TESTS PASSED")
