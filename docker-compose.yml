@@ -48,9 +48,11 @@ services:
 
   # Generates PO tokens so yt-dlp can fetch audio formats from a datacenter
   # IP, which YouTube otherwise refuses even with valid cookies. Internal
-  # only — no host port published.
+  # only — no host port published. The tag must match the plugin pin in
+  # yt_listen_later.py: the plugin refuses to talk to a server on another major
+  # version, and a floating tag let 2.0.0 land on its own and stall every sync.
   pot-provider:
-    image: brainicism/bgutil-ytdlp-pot-provider
+    image: brainicism/bgutil-ytdlp-pot-provider:2.0.0
     container_name: yt-listen-later-pot-provider
     restart: unless-stopped
 

@@ -8,7 +8,7 @@
 #     # Bump both together and run `doctor` to confirm the provider registers.
 #     "yt-dlp==2026.8.19",
 #     "python-dotenv>=1.0.1",
-#     "bgutil-ytdlp-pot-provider==1.3.2",
+#     "bgutil-ytdlp-pot-provider==2.0.0",
 # ]
 # ///
 """Turn a YouTube playlist into a podcast RSS feed you can subscribe to in Overcast.
